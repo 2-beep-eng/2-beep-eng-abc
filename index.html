@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 适配手机端，禁止缩放 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>基金实时估值查询</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "微软雅黑", "PingFang SC", sans-serif;
+        }
+        body {
+            background-color: #f5f7fa;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .container {
+            background: #fff;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 25px;
+            font-weight: 600;
+        }
+        .search-box {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        #fundCode {
+            flex: 1;
+            min-width: 200px;
+            padding: 12px 18px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+        }
+        #fundCode::placeholder {
+            color: #9ca3af;
+        }
+        #queryBtn {
+            padding: 12px 24px;
+            background-color: #4096ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #queryBtn:hover {
+            background-color: #337ecc;
+        }
+        #queryBtn:disabled {
+            background-color: #94bfff;
+            cursor: not-allowed;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+            font-size: 16px;
+            display: none;
+        }
+        .error {
+            text-align: center;
+            color: #ef4444;
+            font-size: 16px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .fund-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .fund-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 18px;
+            transition: box-shadow 0.2s;
+        }
+        .fund-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .fund-code {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .fund-name {
+            font-size: 18px;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .fund-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+        }
+        .info-label {
+            font-size: 14px;
+            color: #666;
+        }
+        .info-value {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .rise {
+            color: #ef4444;
+        }
+        .fall {
+            color: #10b981;
+        }
+        .flat {
+            color: #666;
+        }
+        .update-time {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #9ca3af;
+            text-align: right;
+        }
+        /* 空数据样式 */
+        .empty {
+            text-align: center;
+            color: #666;
+            font-size: 16px;
+            padding: 50px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>基金实时估值查询</h1>
+        <!-- 搜索框 -->
+        <div class="search-box">
+            <input type="text" id="fundCode" placeholder="请输入基金代码，多只用英文逗号分隔（如000001,161725）">
+            <button id="queryBtn" onclick="queryFundValuation()">查询估值</button>
+        </div>
+        <!-- 加载提示 -->
+        <div class="loading" id="loading">正在查询，请稍候...</div>
+        <!-- 错误提示 -->
+        <div class="error" id="error"></div>
+        <!-- 基金结果列表 -->
+        <div class="fund-list" id="fundList"></div>
+    </div>
+
+    <script>
+        // 全局状态：防止重复点击
+        let isQuerying = false;
+
+        // 核心：查询基金实时估值
+        async function queryFundValuation() {
+            // 1. 获取并校验输入
+            const fundCodeInput = document.getElementById('fundCode').value.trim();
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const fundList = document.getElementById('fundList');
+            const queryBtn = document.getElementById('queryBtn');
+
+            // 清空之前的结果和提示
+            error.style.display = 'none';
+            fundList.innerHTML = '';
+
+            // 校验输入非空
+            if (!fundCodeInput) {
+                error.innerText = '请输入基金代码！';
+                error.style.display = 'block';
+                return;
+            }
+
+            // 校验是否重复查询
+            if (isQuerying) return;
+            isQuerying = true;
+            loading.style.display = 'block';
+            queryBtn.disabled = true;
+
+            try {
+                // 2. 拼接基金代码，请求API（免费跨域代理+基金估值接口）
+                // 基金代码转数组，去重
+                const fundCodes = [...new Set(fundCodeInput.split(',').map(code => code.trim()).filter(code => code))];
+                // 免费基金估值API（返回实时估值、涨跌幅等），跨域代理解决前端跨域问题
+                const apiUrl = `https://proxy.cors.sh/https://fundgz.1234567.com.cn/js/${fundCodes.join(',')}.js?rt=0.${new Date().getTime()}`;
+                
+                // 3. 发送请求，解析数据
+                const response = await fetch(apiUrl, {
+                    headers: {
+                        'x-cors-api-key': 'temp_5f0a83f500a9955fbf33339a999e77f' // 临时跨域密钥，可直接用
+                    }
+                });
+
+                if (!response.ok) throw new Error('网络请求失败，请刷新重试');
+                let dataText = await response.text();
+                // 处理API返回的jsonp格式数据，提取核心json
+                dataText = dataText.replace(/^jsonpgz\(/, '').replace(/\);$/, '');
+                const fundData = JSON.parse(dataText);
+                // 统一转成数组（单只基金返回对象，多只返回数组）
+                const fundListData = Array.isArray(fundData) ? fundData : [fundData];
+
+                // 4. 渲染基金数据到页面
+                if (fundListData.length === 0) {
+                    fundList.innerHTML = '<div class="empty">暂无基金数据</div>';
+                    return;
+                }
+
+                fundListData.forEach(fund => {
+                    // 解析核心字段（API返回的字段为中文，直接使用）
+                    const code = fund.fundcode || '未知';
+                    const name = fund.name || '未知基金名称';
+                    const gz = fund.gz || '0.0000'; // 实时估值
+                    const gszzl = fund.gszzl || '0.00'; // 涨跌幅（%）
+                    const gzdz = (gz - fund.dwjz).toFixed(4); // 估值涨跌额（估值-前一日净值）
+                    const updateTime = fund.gztime || '暂无更新时间'; // 估值更新时间
+                    const dwjz = fund.dwjz || '0.0000'; // 前一日净值
+
+                    // 判断涨跌幅样式（红涨、绿跌、灰平）
+                    let priceClass = 'flat';
+                    if (parseFloat(gszzl) > 0) priceClass = 'rise';
+                    else if (parseFloat(gszzl) < 0) priceClass = 'fall';
+
+                    // 拼接基金卡片HTML
+                    const fundCard = `
+                        <div class="fund-card">
+                            <div class="fund-code">基金代码：${code}</div>
+                            <div class="fund-name">${name}</div>
+                            <div class="fund-info">
+                                <span class="info-label">实时估值</span>
+                                <span class="info-value ${priceClass}">${gz}</span>
+                            </div>
+                            <div class="fund-info">
+                                <span class="info-label">涨跌幅</span>
+                                <span class="info-value ${priceClass}">${gszzl}%</span>
+                            </div>
+                            <div class="fund-info">
+                                <span class="info-label">估值涨跌</span>
+                                <span class="info-value ${priceClass}">${gzdz}</span>
+                            </div>
+                            <div class="fund-info">
+                                <span class="info-label">前一日净值</span>
+                                <span class="info-value flat">${dwjz}</span>
+                            </div>
+                            <div class="update-time">估值更新：${updateTime}</div>
+                        </div>
+                    `;
+                    fundList.innerHTML += fundCard;
+                });
+
+            } catch (err) {
+                // 异常处理
+                error.innerText = `查询失败：${err.message}，请检查基金代码是否正确！`;
+                error.style.display = 'block';
+                console.error('查询错误：', err);
+            } finally {
+                // 恢复状态，隐藏加载
+                isQuerying = false;
+                loading.style.display = 'none';
+                queryBtn.disabled = false;
+            }
+        }
+
+        // 回车触发查询（优化体验）
+        document.getElementById('fundCode').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') queryFundValuation();
+        });
+    </script>
+</body>
+</html>
+// 每30秒自动刷新一次估值（注释掉则关闭）
+setInterval(() => {
+    const fundCode = document.getElementById('fundCode').value.trim();
+    if (fundCode) queryFundValuation();
+}, 30000);
